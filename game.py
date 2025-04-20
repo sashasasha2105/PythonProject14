@@ -1,235 +1,310 @@
 # game.py
+# -*- coding: utf-8 -*-
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CommandHandler, CallbackQueryHandler, ContextTypes
 from utils import get_user_data, set_user_data
 
-# Текст главного меню, отформатированный с переносами строк
-MAIN_MENU_TEXT = (
-    "Привет! Я Академия ПК – ваш надёжный помощник в мире компьютерных технологий.\n\n"
-    "Я могу помочь вам пошагово собрать персональный компьютер, учитывая особенности ваших комплектующих.\n"
-    "Также я предлагаю два обучающих режима и интерактивное тестирование:\n\n"
-    "• Ассистент сборки ПК – подробная инструкция по сборке компьютера.\n"
-    "• Обучающий режим – выбор обучающих курсов (Базовый, Продвинутый, Профессиональный) для получения полной информации.\n"
-    "• Интерактивный режим – сборка ПК по выбранному бюджету с интерактивными выборами комплектующих.\n\n"
-    "Выберите режим работы:"
-)
+# ======================================
+#          Настройки интерактивного режима
+# ======================================
 
-# Определяем этапы сборки (5 этапов)
+# Бюджеты на выбор (₽)
+BUDGETS = [50_000, 100_000, 200_000]
+
+# Этапы сборки, ценовая политика и пояснения
 STEPS = [
     {
         "component": "Процессор",
         "options": [
-            {"name": "Intel Core i7-10700K (новый)", "price": 20000},
-            {"name": "Intel Core i5-9400F (б/у)", "price": 12000}
+            {"name": "Intel Core i3‑12100F", "price": 8_000},
+            {"name": "AMD Ryzen 5 5600X",  "price": 14_000},
+            {"name": "Intel Core i7‑12700K","price": 28_000},
         ],
-        "optimal": 0
+        "optimal_game": 1,
+        "optimal_work": 2,
+        "analysis": {
+            "game": (
+                "Для современных игр важна высокая тактовая частота и хорошая производительность на одно ядро. "
+                "Ryzen 5 5600X предлагает 6 ядер с басом до 4.6 ГГц, что делает его отличным выбором для большинства игр."
+            ),
+            "work": (
+                "В рабочих приложениях (рендер, компиляция, многозадачность) ценятся максимальное число ядер и потоков. "
+                "Core i7‑12700K с 12 реальными ядрами и 20 потоками позволит быстрее справляться с тяжёлыми задачами."
+            )
+        }
     },
     {
         "component": "Видеокарта",
         "options": [
-            {"name": "NVIDIA GeForce RTX 3060 (новый)", "price": 25000},
-            {"name": "NVIDIA GeForce GTX 1660 (б/у)", "price": 15000}
+            {"name": "NVIDIA GTX 1650",    "price": 12_000},
+            {"name": "AMD Radeon RX 6600", "price": 20_000},
+            {"name": "NVIDIA RTX 3060 Ti", "price": 30_000},
         ],
-        "optimal": 0
+        "optimal_game": 2,
+        "optimal_work": 0,
+        "analysis": {
+            "game": (
+                "Для максимальной частоты кадров в играх RTX 3060 Ti обладает достаточным запасом CUDA‑ядер и высокой пропускной способностью памяти. "
+                "Это позволит играть на высоких настройках в 1080p–1440p."
+            ),
+            "work": (
+                "Если цель — офисные и профессиональные приложения без 3D‑ускорения, то дискретная видеокарта не критична. "
+                "GTX 1650 достаточно для базового вывода изображения и ускорения интерфейсов."
+            )
+        }
     },
     {
-        "component": "Оперативная память",
+        "component": "Оперативная память (16 ГБ)",
         "options": [
-            {"name": "16GB DDR4 (новый)", "price": 8000},
-            {"name": "8GB DDR4 (б/у)", "price": 4000}
+            {"name": "2×8 GB DDR4‑3200", "price": 6_000},
+            {"name": "2×8 GB DDR4‑3600", "price": 7_000},
+            {"name": "2×8 GB DDR5‑5200", "price": 10_000},
         ],
-        "optimal": 0
+        "optimal_game": 1,
+        "optimal_work": 2,
+        "analysis": {
+            "game": (
+                "DDR4‑3600 обеспечивает сбалансированное соотношение скорости и стоимости для игр — частота выше стандартной, что даёт небольшой прирост FPS."
+            ),
+            "work": (
+                "В рабочих задачах (виртуалки, компиляции) DDR5‑5200 даст лучший пропускной поток данных, ускоряя многопоточные операции."
+            )
+        }
     },
     {
-        "component": "Накопитель",
+        "component": "SSD‑накопитель",
         "options": [
-            {"name": "512GB NVMe SSD (новый)", "price": 6000},
-            {"name": "1TB HDD (б/у)", "price": 3000}
+            {"name": "512 GB NVMe PCIe 3.0", "price": 5_000},
+            {"name": "1 TB NVMe PCIe 3.0",   "price": 8_000},
+            {"name": "1 TB NVMe PCIe 4.0",   "price": 12_000},
         ],
-        "optimal": 0
+        "optimal_game": 1,
+        "optimal_work": 1,
+        "analysis": {
+            "game": (
+                "1 TB PCIe 3.0 — достаточный объём и скорость для игр, позволит устанавливать несколько тяжёлых тайтлов без разгонки бюджета."
+            ),
+            "work": (
+                "1 TB PCIe 3.0 обеспечивает баланс между объёмом и скоростью для рабочих проектов, где важен объём хранения."
+            )
+        }
     },
     {
         "component": "Блок питания",
         "options": [
-            {"name": "650W Gold PSU (новый)", "price": 5000},
-            {"name": "500W PSU (б/у)", "price": 3000}
+            {"name": "550 W Bronze", "price": 4_000},
+            {"name": "650 W Gold",   "price": 6_000},
+            {"name": "750 W Gold",   "price": 8_000},
         ],
-        "optimal": 0
-    }
+        "optimal_game": 1,
+        "optimal_work": 1,
+        "analysis": {
+            "game": (
+                "650 W Gold — достаточный запас мощности и высокий КПД для системы с RTX 3060 Ti и Ryzen 5."
+            ),
+            "work": (
+                "650 W Gold подходит и для рабочих станций, обеспечивает стабильность и небольшой запас для апгрейда."
+            )
+        }
+    },
+    {
+        "component": "Охлаждение",
+        "options": [
+            {"name": "Стоковый кулер","price": 1_000},
+            {"name": "Башенный кулер","price": 3_000},
+            {"name": "AIO 240 мм",    "price": 6_000},
+        ],
+        "optimal_game": 1,
+        "optimal_work": 1,
+        "analysis": {
+            "game": (
+                "Башенный кулер обеспечит более низкие температуры и тихую работу, чем стоковый, при умеренной стоимости."
+            ),
+            "work": (
+                "Башенный кулер достаточно для многозадачности и сравнительно тихой работы, а AIO не даст существенного выигрыша за двойную цену."
+            )
+        }
+    },
 ]
+
 TOTAL_STEPS = len(STEPS)
 
-# --- Функция отправки сообщений ---
-async def send_stage_message(update: Update, text: str, header: str = "", reply_markup=None):
-    if header:
-        styled_header = f"<b>{header}</b>"
-    else:
-        styled_header = ""
-    final_text = f"{styled_header}\n{text}"
-    await update.effective_message.reply_text(final_text, reply_markup=reply_markup, parse_mode='HTML')
-
-# --- Клавиатуры ---
+# ======================================
+#        Утилиты для клавиатур
+# ======================================
 def build_main_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Ассистент сборки ПК", callback_data="assistant_pc"),
-         InlineKeyboardButton("Обучающий режим", callback_data="educational_mode"),
-         InlineKeyboardButton("Интерактивный режим", callback_data="game_mode")]
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="game_home")]
+    ])
+
+def build_purpose_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎮 Игры", callback_data="purpose_game"),
+            InlineKeyboardButton("💼 Работа", callback_data="purpose_work"),
+        ],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="game_home")]
     ])
 
 def build_budget_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("50.000 рублей", callback_data="budget_50000")],
-        [InlineKeyboardButton("75.000 рублей", callback_data="budget_75000")],
-        [InlineKeyboardButton("100.000 рублей", callback_data="budget_100000")]
-    ])
+    buttons = [InlineKeyboardButton(f"{b//1000} 000 ₽", callback_data=f"budget_{b}") for b in BUDGETS]
+    return InlineKeyboardMarkup([buttons, [InlineKeyboardButton("🏠 Главное меню", callback_data="game_home")]])
 
 def build_choice_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1", callback_data="game_choice_0"),
-         InlineKeyboardButton("2", callback_data="game_choice_1")]
+        [
+            InlineKeyboardButton("1️⃣", callback_data="choice_0"),
+            InlineKeyboardButton("2️⃣", callback_data="choice_1"),
+            InlineKeyboardButton("3️⃣", callback_data="choice_2"),
+        ],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="game_home")]
     ])
 
 def build_restart_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Пройти заново", callback_data="game_restart"),
-         InlineKeyboardButton("Домой", callback_data="game_home")]
+        [InlineKeyboardButton("🔄 Пройти заново", callback_data="game_restart")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="game_home")]
     ])
 
-# --- Логика игры ---
-async def start_game_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    text = (
-        "Ты попал в интерактивный режим.\n"
-        "Твоя задача выбрать бюджет сборки ПК и собрать максимально производительную систему под различные задачи.\n"
-        "Помни, что нужно грамотно распределять бюджет и тратить основную часть денег на видеокарту и процессор.\n\n"
-        "Выбери режим сборки ПК:"
+# ======================================
+#        Отправка сообщений
+# ======================================
+async def send_stage_message(update: Update, text: str, header: str = "", reply_markup=None):
+    styled_header = f"<b>{header}</b>\n\n" if header else ""
+    await update.effective_message.reply_text(
+        f"{styled_header}{text}",
+        parse_mode="HTML",
+        reply_markup=reply_markup
     )
-    keyboard = build_budget_keyboard()
-    await update.effective_message.reply_text(text, reply_markup=keyboard)
 
-async def handle_budget_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    data = query.data  # Например, "budget_50000"
-    budget = int(data.split("_")[1])
+# ======================================
+#            Логика игры
+# ======================================
+async def start_game_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = "🕹️ <b>Интерактивная сборка ПК</b>\n\nДля каких задач собираете систему?"
+    await send_stage_message(update, text, reply_markup=build_purpose_keyboard())
+
+async def handle_purpose(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query; await query.answer()
+    purpose = query.data.split("_")[1]  # "game" или "work"
     chat_id = query.message.chat_id
-    init_game_state(chat_id, budget)
-    await show_game_step(update, context)
+    set_user_data(chat_id, {
+        "purpose": purpose,
+        "budget": None,
+        "remaining": None,
+        "step": 0,
+        "selections": []
+    })
+    text = "💰 Выберите бюджет сборки:"
+    await send_stage_message(update, text, reply_markup=build_budget_keyboard())
 
-def init_game_state(chat_id: int, budget: int):
-    state = {
-        "game_budget": budget,
-        "game_remaining": budget,
-        "game_step": 0,
-        "game_selections": []
-    }
-    set_user_data(chat_id, state)
-
-def update_game_state(chat_id: int, state: dict):
-    set_user_data(chat_id, state)
-
-def get_game_state(chat_id: int) -> dict:
-    return get_user_data(chat_id)
-
-async def show_game_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
+async def handle_budget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query; await query.answer()
+    budget = int(query.data.split("_")[1])
     chat_id = query.message.chat_id
-    state = get_game_state(chat_id)
-    step_index = state.get("game_step", 0)
-    if step_index < TOTAL_STEPS:
-        step = STEPS[step_index]
-        component = step["component"]
-        options = step["options"]
-        remaining = state.get("game_remaining", 0)
-        text = f"Шаг {step_index + 1} из {TOTAL_STEPS}.\nВыберите {component}:\n\n"
-        text += f"1) {options[0]['name']} – {options[0]['price']} руб.\n"
-        text += f"2) {options[1]['name']} – {options[1]['price']} руб.\n\n"
-        text += f"Остаток бюджета: {remaining} руб."
-        await send_stage_message(update, text, header="Интерактивный режим", reply_markup=build_choice_keyboard())
+    state = get_user_data(chat_id)
+    state["budget"] = budget
+    state["remaining"] = budget
+    set_user_data(chat_id, state)
+    await show_next_step(update, context)
+
+async def show_next_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query; await query.answer()
+    state = get_user_data(query.message.chat_id)
+    idx = state["step"]
+    if idx < TOTAL_STEPS:
+        step = STEPS[idx]
+        text = (
+            f"Шаг {idx+1} из {TOTAL_STEPS} — выберите <b>{step['component']}</b>:\n\n"
+            f"1) {step['options'][0]['name']} — {step['options'][0]['price']} ₽\n"
+            f"2) {step['options'][1]['name']} — {step['options'][1]['price']} ₽\n"
+            f"3) {step['options'][2]['name']} — {step['options'][2]['price']} ₽\n\n"
+            f"Остаток бюджета: {state['remaining']} ₽"
+        )
+        await send_stage_message(update, text, header="Сборка ПК", reply_markup=build_choice_keyboard())
     else:
-        await show_game_result(update, context)
+        await show_result(update, context)
 
-async def handle_game_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
+async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query; await query.answer()
     chat_id = query.message.chat_id
-    state = get_game_state(chat_id)
-    step_index = state.get("game_step", 0)
-    current_step = STEPS[step_index]
-    selected_option = int(query.data.split("_")[-1])  # 0 или 1
-    price = current_step["options"][selected_option]["price"]
-    remaining = state.get("game_remaining", 0) - price
-    state["game_remaining"] = remaining
-    state.setdefault("game_selections", []).append(selected_option)
-    if remaining < 0:
-        text = "Бюджет исчерпан! Вы не смогли завершить сборку."
-        await send_stage_message(update, text, header="Интерактивный режим", reply_markup=build_restart_keyboard())
-        update_game_state(chat_id, state)
+    state = get_user_data(chat_id)
+    idx = state["step"]
+    choice = int(query.data.split("_")[1])
+    price = STEPS[idx]["options"][choice]["price"]
+    state["remaining"] -= price
+    state["selections"].append(choice)
+    state["step"] += 1
+    set_user_data(chat_id, state)
+
+    if state["remaining"] < 0:
+        await send_stage_message(
+            update,
+            "❌ Бюджет исчерпан! Сборка прервана.",
+            header="Ошибка",
+            reply_markup=build_restart_keyboard()
+        )
         return
-    state["game_step"] = step_index + 1
-    update_game_state(chat_id, state)
-    if state["game_step"] < TOTAL_STEPS:
-        await show_game_step(update, context)
-    else:
-        await show_game_result(update, context)
 
-async def show_game_result(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    chat_id = query.message.chat_id
-    state = get_game_state(chat_id)
-    selections = state.get("game_selections", [])
-    total_spent = state.get("game_budget", 0) - state.get("game_remaining", 0)
-    optimal_count = 0
-    result_text = "Итоговая сборка:\n"
-    for i, step in enumerate(STEPS):
-        component = step["component"]
-        chosen = selections[i] if i < len(selections) else None
-        option = step["options"][chosen] if chosen is not None else {}
-        result_text += f"{i+1}. {component}: {option.get('name', 'Не выбрано')} – {option.get('price', 0)} руб.\n"
-        if chosen == step["optimal"]:
-            optimal_count += 1
-    result_text += f"\nОбщая стоимость: {total_spent} руб.\n"
-    result_text += f"Оптимальных выборов: {optimal_count} из {TOTAL_STEPS}.\n"
-    if optimal_count == TOTAL_STEPS:
-        result_text += "Отличная сборка! Вы собрали оптимальную систему."
-    elif optimal_count >= TOTAL_STEPS - 1:
-        result_text += "Очень хорошая сборка, почти идеальная!"
+    await show_next_step(update, context)
+
+async def show_result(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query; await query.answer()
+    state = get_user_data(query.message.chat_id)
+    total_spent = state["budget"] - state["remaining"]
+    optimal = 0
+    lines = ["🏁 <b>Результаты сборки</b>\n"]
+    purpose = state["purpose"]
+
+    # Отчёт по выбору
+    for i, sel in enumerate(state["selections"]):
+        comp = STEPS[i]["component"]
+        opt = STEPS[i]["options"][sel]
+        best = STEPS[i][f"optimal_{purpose}"]
+        mark = "✅" if sel == best else "❌"
+        if sel == best:
+            optimal += 1
+        lines.append(f"{mark} {comp}: {opt['name']} — {opt['price']} ₽")
+
+    lines.append(f"\n💰 Потрачено: {total_spent} ₽ из {state['budget']} ₽")
+    lines.append(f"🏆 Оптимальных выборов: {optimal} из {TOTAL_STEPS}")
+
+    # Глубокий теханализ
+    if optimal == TOTAL_STEPS:
+        lines.append("\n🎉 Отличная сборка! Вы идеально уложились в цель.")
     else:
-        result_text += "Сборка оставляет простор для улучшения. Рекомендуется перераспределить бюджет."
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Пройти заново", callback_data="game_restart"),
-         InlineKeyboardButton("Домой", callback_data="game_home")]
-    ])
-    await send_stage_message(update, result_text, header="Результаты сборки", reply_markup=keyboard)
+        lines.append("\n🔎 <b>Глубокий теханализ:</b>")
+        for i, sel in enumerate(state["selections"]):
+            best = STEPS[i][f"optimal_{purpose}"]
+            if sel != best:
+                wrong_name = STEPS[i]["options"][sel]["name"]
+                correct_name = STEPS[i]["options"][best]["name"]
+                explanation = STEPS[i]["analysis"][purpose]
+                lines.append(f"\n• <b>{STEPS[i]['component']}</b>: вы выбрали «{wrong_name}», а лучше «{correct_name}».\n  {explanation}")
+
+    await send_stage_message(update, "\n".join(lines), reply_markup=build_restart_keyboard())
 
 async def restart_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
+    query = update.callback_query; await query.answer()
     await start_game_mode(update, context)
 
 async def game_go_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text=MAIN_MENU_TEXT,
-        reply_markup=build_main_menu_keyboard(),
-        parse_mode='HTML'
-    )
+    query = update.callback_query; await query.answer()
+    from main import start_main_menu
+    await start_main_menu(update, context)
 
-# --- Функции обновления состояния игры ---
-def update_game_state(chat_id: int, state: dict):
-    set_user_data(chat_id, state)
-
-def get_game_state(chat_id: int) -> dict:
-    return get_user_data(chat_id)
-
-# --------------------------------------------------
-# Регистрация обработчиков для интерактивного режима (game mode)
-# --------------------------------------------------
+# ======================================
+#         Регистрация обработчиков
+# ======================================
 def setup_handlers(app):
     app.add_handler(CommandHandler("game", start_game_mode))
-    app.add_handler(CallbackQueryHandler(start_game_mode, pattern="^game_mode$"))
-    app.add_handler(CallbackQueryHandler(handle_budget_selection, pattern="^budget_"))
-    app.add_handler(CallbackQueryHandler(handle_game_choice, pattern="^game_choice_"))
-    app.add_handler(CallbackQueryHandler(restart_game, pattern="^game_restart$"))
-    app.add_handler(CallbackQueryHandler(game_go_home, pattern="^game_home$"))
+    app.add_handler(CallbackQueryHandler(start_game_mode,       pattern="^game_mode$"))
+    app.add_handler(CallbackQueryHandler(handle_purpose,        pattern="^purpose_"))
+    app.add_handler(CallbackQueryHandler(handle_budget,         pattern="^budget_"))
+    app.add_handler(CallbackQueryHandler(handle_choice,         pattern="^choice_"))
+    app.add_handler(CallbackQueryHandler(restart_game,          pattern="^game_restart$"))
+    app.add_handler(CallbackQueryHandler(game_go_home,          pattern="^game_home$"))
+
+# Алиас для main.py
+start_game_mode = start_game_mode

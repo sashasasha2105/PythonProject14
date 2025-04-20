@@ -1,614 +1,820 @@
-# assistant_pc.py
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+# -*- coding: utf-8 -*-
+"""
+assistant_pc.py — Ассистент сборки ПК (расширенная версия).
+Дата: 20 апр 2025
+"""
+
+from pathlib import Path
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 from data import (
-    steps,
-    cooling_instructions,
-    ram_instructions,
-    fan_instructions,
-    power_supply_instructions,
-    gpu_instructions,
-    wires_instructions
+    steps, cooling_instructions, ram_instructions,
+    fan_instructions, power_supply_instructions,
+    gpu_instructions, wires_instructions
 )
-from utils import get_user_data, set_user_data, update_user_step
+from utils import get_user_data, set_user_data
 
-# Общее количество этапов сборки (для расчёта процента завершения)
+# ─────────────────────────────────────────────────────────────
+# 1 ▸ Тексты шагов
+# ─────────────────────────────────────────────────────────────
+PREPARATION_FULL = """
+<b>🔧 Подготовка рабочего места</b>
+
+1️⃣ <b>Стол</b> — ровная поверхность минимум 80×60 см.  
+2️⃣ <b>Антистатика</b> — браслет + клипса к корпусу БП или касайтесь металла каждые 2 мин.  
+3️⃣ <b>Инструменты</b> — PH2, PH1, плоскогубцы, пинцет, бокорезы, стяжки, термопаста, салфетки.  
+4️⃣ <b>Раскладка</b> — корпус без панелей, матплата на коробке, комплектующие рядом.  
+5️⃣ <b>Освещение</b> — яркая лампа, 20–26 °C, без сквозняков и пыли.
+""".strip()
+
+# CPU
+steps["Intel"]["instructions"][0] = """
+<b>⚙️ Установка процессора Intel (LGA‑сокет)</b>
+
+1️⃣ Откройте рычаг и поднимите рамку сокета.  
+2️⃣ Совместите золотой треугольник на CPU с меткой на сокете.  
+3️⃣ Опустите процессор строго вертикально, не давите.  
+4️⃣ Закройте рамку и опустите рычаг до щелчка.  
+5️⃣ Проверьте, что CPU не шатается.
+
+⚠️ Не касайтесь контактных площадек пальцами!  
+<a href="https://rutube.ru/video/1c42d5692ee827b3c815e963bc1dcac0/">Видео Intel</a>
+""".strip()
+
+steps["AMD"]["instructions"][0] = """
+<b>⚙️ Установка процессора AMD (AM4/AM5)</b>
+
+<b>AM4 (PGA)</b>  
+1️⃣ Поднимите рычаг на 90°.  
+2️⃣ Совместите треугольник CPU с меткой сокета.  
+3️⃣ Опустите CPU, затем опустите рычаг.
+
+<b>AM5 (LGA)</b>  
+1️⃣ Откройте рамку, приподняв фиксатор.  
+2️⃣ Совместите направляющие CPU и сокета.  
+3️⃣ Опустите CPU строго вертикально.  
+4️⃣ Закройте рамку до щелчка.
+
+⚠️ Не сгибайте ножки и не касайтесь площадок!  
+<a href="https://rutube.ru/video/cf6d5d2cfbe19149fde57551e8e53022/">Видео AMD</a>
+""".strip()
+
+# RAM
+ram_instructions.update({
+    "1": """
+<b>💾 Установка 1 планки ОЗУ</b>
+
+1️⃣ Откройте защелки слота A2.  
+2️⃣ Совместите вырез модуля и паз слота.  
+3️⃣ Нажмите до щелчка, защелки закроются.  
+4️⃣ Проверьте выравнивание.
+""".strip(),
+    "2": """
+<b>💾 Установка 2 планок (двухканал)</b>
+
+1️⃣ Откройте защелки A2 и B2.  
+2️⃣ Вставьте оба модуля, нажмите до щелчков.  
+3️⃣ Убедитесь в равном положении.
+""".strip(),
+    "4": """
+<b>💾 Установка 4 планок (четырёхканал)</b>
+
+1️⃣ Откройте все защелки.  
+2️⃣ Вставьте A1→B1→A2→B2.  
+3️⃣ Нажмите до щелчков, проверьте выравнивание.
+""".strip(),
+})
+
+# M.2
+M2_DETAILED = """
+<b>🗜️ Установка M.2 SSD</b>
+
+1️⃣ Отверните винтик‑фиксатор и положите рядом.  
+2️⃣ Вставьте SSD под углом ~30° до упора.  
+3️⃣ Опустите горизонтально, совместите отверстие.  
+4️⃣ Закрутите винт пальцами — не перетягивайте.  
+5️⃣ При наличии радиатора установите его поверх SSD.  
+<a href="https://rutube.ru/video/fa86b5395ed102e415eb00d8a3b2f9fd/">Видео M.2</a>
+""".strip()
+
+# Cooling
+cooling_instructions["Intel"]["air"] = """
+<b>🌀 Воздушный кулер Intel (башня)</b>
+
+1️⃣ Установите back‑plate за платой.  
+2️⃣ Вверните стойки, прикрутите рамку.  
+3️⃣ Наденьте радиатор, закрепите крест‑накрест.  
+4️⃣ Прикрутите вентилятор стрелой к задней панели.  
+5️⃣ Подключите 4‑pin к <code>CPU_FAN</code>.  
+<a href="https://yandex.ru/video/preview/15387608359965564597">Видео Intel air</a>
+""".strip()
+
+cooling_instructions["Intel"]["water"] = """
+<b>💧 AIO Intel</b>
+
+1️⃣ Установите back‑plate и стойки.  
+2️⃣ Снимите плёнку с водоблока.  
+3️⃣ Надавите, закрутите крест‑накрест.  
+4️⃣ Прикрутите вентиляторы стрелками наружу.  
+5️⃣ Подключите Pump→<code>PUMP_FAN</code>, Fans→<code>SYS_FAN</code>.  
+<a href="https://yandex.ru/video/preview/8565882692027585885">Видео Intel water</a>
+""".strip()
+
+cooling_instructions["AMD"]["air"] = """
+<b>🌀 Воздушный кулер AMD (AM4/AM5)</b>
+
+1️⃣ Установите лапы кулера на стойки.  
+2️⃣ Наденьте радиатор вертикально.  
+3️⃣ Закрутите пружинные винты по диагонали.  
+4️⃣ Прикрутите вентилятор стрелкой наружу.  
+5️⃣ Подключите к <code>CPU_FAN</code>.  
+<a href="https://rutube.ru/video/2d0be3979a44d55577b5ec1ac4902b36/">Видео AMD air</a>
+""".strip()
+
+cooling_instructions["AMD"]["water"] = """
+<b>💧 AIO AMD</b>
+
+1️⃣ Вкрутите стойки в штатный back‑plate.  
+2️⃣ Снимите плёнку, установите блок.  
+3️⃣ Закрутите крест‑накрест.  
+4️⃣ Подключите Fans→<code>SYS_FAN</code>, Pump→<code>PUMP_FAN</code>.  
+5️⃣ ARGB/RGB → хедеры.  
+<a href="https://www.youtube.com/watch?v=yjCPn3IZRJQ">Видео AMD water</a>
+""".strip()
+
+# Fans
+fan_instructions.clear()
+fan_instructions.update({
+    "aquarium": """
+<b>🌀 Аквариумный корпус</b>
+
+1️⃣ Проверьте отверстия под 120/140 мм.  
+2️⃣ Низ (вдув): 3×120, стрелка вверх.  
+3️⃣ Бок (вдув): 2–3×120, стрелка внутрь.  
+4️⃣ Верх (выдув): 3×140, стрелка наружу.  
+5️⃣ Зад (выдув): 1×120, стрелка направо.  
+6️⃣ Подключите:
+   • <code>CPU_FAN</code> → кулер  
+   • Нижние/боковые → HUB → <code>SYS_FAN1/2</code>  
+   • Верхние/задние → <code>SYS_FAN3/4</code>  
+7️⃣ ARGB: D‑Out→D‑In→<code>ARGB_HEADER</code>.  
+8️⃣ Кабели стяжками за лотком.
+""".strip(),
+    "classic_bottom": """
+<b>🌀 Классический корпус (БП внизу)</b>
+
+1️⃣ Перед (вдув): 2–3×140, стрелка внутрь.  
+2️⃣ Верх (выдув): 2×120, стрелка наружу.  
+3️⃣ Зад (выдув): 1×120.  
+4️⃣ Подключите:
+   • Передние → HUB (SATA) → <code>SYS_FAN1</code>  
+   • Верхние → Y‑кабель → <code>SYS_FAN2</code>  
+   • Задний → <code>SYS_FAN3</code>  
+5️⃣ ARGB → <code>ARGB_HEADER</code> + SATA.  
+6️⃣ Кабели стяжками за лотком.
+""".strip(),
+    "classic_top": """
+<b>🌀 Классический корпус (БП сверху)</b>
+
+1️⃣ Перед (вдув): 2×120, стрелка внутрь.  
+2️⃣ Зад (выдув): 1×120, стрелка наружу.  
+3️⃣ Передние → Y‑кабель → <code>SYS_FAN1/2</code>  
+4️⃣ Задний → <code>SYS_FAN3</code>  
+5️⃣ ARGB → D‑Out→D‑In→<code>ARGB_HEADER</code>.  
+6️⃣ Кабели под кожухом.
+""".strip(),
+    "already_installed": """
+<b>🌀 Вентиляторы уже установлены</b>
+
+1️⃣ Проверьте направление стрелок.  
+2️⃣ Подключите:
+   • <code>CPU_FAN</code> → кулер  
+   • <code>SYS_FAN</code> → корпус  
+3️⃣ ARGB 3‑pin → <code>ARGB_HEADER</code>, RGB 4‑pin → контроллер.  
+4️⃣ Кабели стяжками.
+""".strip(),
+})
+
+# PSU
+power_supply_instructions = """
+<b>🔌 Установка блока питания (ATX)</b>
+
+1️⃣ Отключите питание и выньте кабель.  
+2️⃣ Установите вентилятором вниз или к фильтру.  
+3️⃣ Закрутите 4 винта крест‑накрест.  
+4️⃣ Подключите:
+   • ATX 24‑pin → матплата  
+   • EPS 8‑pin → CPU  
+   • PCI‑E/12VHPWR → GPU  
+   • SATA Power → накопители и хабы  
+   • Molex → старые устройства  
+5️⃣ Кабели стяжками за лотком.  
+6️⃣ Подключите кабель, включите тумблер «1».  
+<a href="https://rutube.ru/video/98be6d9b389beee69b686336528481ea/">Видео PSU</a>
+""".strip()
+
+# GPU
+gpu_instructions = """
+<b>🎮 Установка видеокарты</b>
+
+1️⃣ Снимите заглушки PCI‑E.  
+2️⃣ Отожмите защелку слота.  
+3️⃣ Вставьте карту ровно — щелчок.  
+4️⃣ Закрутите винты.  
+5️⃣ Подключите питание 6/8‑pin или 12VHPWR.  
+6️⃣ Установите подпорку при необходимости.  
+7️⃣ Кабели не мешают лопастям.
+""".strip()
+
+# Wires
+wires_instructions = f"""
+<b>🔗 Подключение кабелей</b>
+
+1️⃣ ATX 24‑pin → правый край матплаты.  
+2️⃣ EPS 8‑pin → верхний край.  
+3️⃣ PCI‑E/12VHPWR → GPU.  
+4️⃣ SATA Power → SSD/HDD, хабы.  
+5️⃣ SATA Data → порт на плате.
+
+6️⃣ Фронт‑панель PANEL1 (IMG_5330.jpg):
+   • 1️⃣ HDD_LED+ → HDD+
+   • 3️⃣ HDD_LED‑ → HDD‑
+   • 2️⃣ PLED+ → PLED+
+   • 4️⃣ PLED‑ → PLED‑
+   • 5️⃣ RESET‑ → RES‑
+   • 7️⃣ RESET+ → RES+
+   • 6️⃣ POWER+ → PW+
+   • 8️⃣ POWER‑ → PW‑
+   • 9️⃣ KEY → пусто
+
+🔟 Вентиляторы: CPU_FAN, SYS_FAN1/2/3, PUMP_FAN  
+1️⃣1️⃣ ARGB / RGB (см. выше)  
+1️⃣2️⃣ Кабели стяжками за лотком.
+""".strip()
+
+# OS
+WIN_TEXT = """
+<b>🖥️ Установка Windows 10/11</b>
+
+1️⃣ Скачайте Media Creation Tool.  
+2️⃣ Создайте UEFI‑GPT флешку (8 ГБ+).  
+3️⃣ В BIOS включите AHCI, отключите Secure Boot.  
+4️⃣ Загрузитесь с флешки (F11/F12/Esc).  
+5️⃣ Разделы: EFI, MSR, NTFS.  
+6️⃣ Установите драйверы и обновления.
+""".strip()
+
+LINUX_TEXT = """
+<b>🐧 Установка Ubuntu 22.04 LTS</b>
+
+1️⃣ Скачайте ISO, проверьте SHA256.  
+2️⃣ Rufus (DD) или Etcher, UEFI‑GPT.  
+3️⃣ BIOS: AHCI on, Secure Boot off.  
+4️⃣ Загрузитесь → Install Ubuntu.  
+5️⃣ Разметьте GPT: EFI, swap, ext4.  
+6️⃣ <code>sudo ubuntu-drivers autoinstall</code>.  
+7️⃣ <code>sudo apt update && sudo apt upgrade -y</code>.
+""".strip()
+
+MAC_TEXT = """
+<b>🍎 Установка macOS (Hackintosh/OpenCore)</b>
+
+1️⃣ Создайте флешку через GibMacOS.  
+2️⃣ BIOS: AHCI=Enabled, XHCI Hand‑Off=Enabled, Secure Boot=Disabled, VT-d=Disabled.  
+3️⃣ Загрузитесь → Install macOS.  
+4️⃣ Формат APFS/GUID.  
+5️⃣ Установите OC на SSD, скопируйте EFI.  
+6️⃣ Kexts: Lilu, VirtualSMC, WhateverGreen, AppleALC.  
+7️⃣ Настройте config.plist.  
+8️⃣ Перезагрузитесь без флешки.
+""".strip()
+
+# ─────────────────────────────────────────────────────────────
+# 2 ▸ Прогресс и утилиты
+# ─────────────────────────────────────────────────────────────
 TOTAL_STEPS = 8
 
-def get_progress_text(progress, total=TOTAL_STEPS):
-    percent = int((progress / total) * 100)
-    filled = "🟢" * progress
-    unfilled = "⚪" * (total - progress)
-    return f"Прогресс сборки: [{filled}{unfilled}] {percent}%"
+def get_progress_text(p, total=TOTAL_STEPS):
+    p = max(0, min(p, total))
+    pct = round(p * 100 / total)
+    bar = '🟢' * p + '⚪' * (total - p)
+    return f"Прогресс: [{bar}] {pct}%"
 
-def increment_progress(chat_id):
-    data = get_user_data(chat_id)
-    current = data.get("progress", 0)
-    data["progress"] = current + 1
-    set_user_data(chat_id, data)
+def increment_progress(cid):
+    d = get_user_data(cid)
+    d["progress"] = max(0, min(d.get("progress", 0) + 1, TOTAL_STEPS))
+    set_user_data(cid, d)
 
-def current_progress_text(chat_id):
-    data = get_user_data(chat_id)
-    progress = data.get("progress", 0)
-    return get_progress_text(progress)
+def decrement_progress(cid):
+    d = get_user_data(cid)
+    d["progress"] = max(0, min(d.get("progress", 0) - 1, TOTAL_STEPS))
+    set_user_data(cid, d)
 
-async def send_stage_message(update: Update, text: str, header: str = "", reply_markup=None):
-    """
-    Отправляет сообщение с жирным заголовком и неизменным текстом.
-    """
-    if header:
-        clean_header = header.replace("🤖", "").strip()
-        styled_header = f"<b>{clean_header}</b>"
-    else:
-        styled_header = ""
-    final_text = f"{styled_header}\n{text}"
-    await update.effective_message.reply_text(final_text, reply_markup=reply_markup, parse_mode='HTML')
+def current_progress_text(cid):
+    return get_progress_text(get_user_data(cid).get("progress", 0))
 
-# --------------------------------------------------
-# Исходное приветственное сообщение (главное меню режима ассистента)
-# --------------------------------------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Отправляет исходное приветственное сообщение режима Ассистента сборки ПК.
-    Это сообщение содержит описание режимов, как в оригинале.
-    """
-    chat_id = update.effective_chat.id
-    set_user_data(chat_id, {"progress": 0})
-    welcome_text = (
-        "Привет! Я Академия ПК – ваш надёжный помощник в мире компьютерных технологий.\n\n"
-        "Я могу помочь вам пошагово собрать персональный компьютер, учитывая особенности ваших комплектующих. "
-        "Также я предлагаю два обучающих режима и интерактивное тестирование:\n\n"
-        "• Ассистент сборки ПК – подробная инструкция по сборке компьютера.\n"
-        "• Обучающий режим – выберите один из обучающих курсов (Базовый, Продвинутый, Профессиональный) "
-        "для получения полной обучающей информации и прохождения теста соответствующей сложности.\n"
-        "• Интерактивный режим – общий тест по знаниям о ПК.\n\n"
-        "Выберите режим работы:"
-    )
-    main_menu_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Ассистент сборки ПК", callback_data="assistant_pc"),
-         InlineKeyboardButton("Обучающий режим", callback_data="educational_mode")]
-    ])
-    await send_stage_message(update, welcome_text, header="🌟 Главное меню", reply_markup=main_menu_keyboard)
-
-# --------------------------------------------------
-# Режим "Ассистент сборки ПК"
-# --------------------------------------------------
-async def assistant_pc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Запуск режима Ассистента сборки ПК.
-    Вызывается из главного меню по callback_data "assistant_pc".
-    """
-    query = update.callback_query
-    await query.answer()
-    text = (
-        "Привет! Я чат-бот по сборке вашего ПК. У вас есть все необходимые компоненты для сборки?\n\n"
-        "Проверьте наличие:\n"
-        "- Материнская плата\n"
-        "- Процессор\n"
-        "- Охлаждение процессора\n"
-        "- Оперативная память\n"
-        "- Накопитель\n"
-        "- Блок питания\n"
-        "- Корпус\n"
-        "- Видеокарта (если нужна)\n"
-        "- Отвертки\n"
-        "- Термопаста"
-    )
-    await send_stage_message(update, text, header="Режим ассистента сборки",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Я готов", callback_data="ready"),
-                                    InlineKeyboardButton("Еще нужно подготовиться", callback_data="not_ready")],
-                                   [InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-# --------------------------------------------------
-# Обработчик кнопки "Домой" – возвращает в главное меню
-# --------------------------------------------------
-async def go_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    При нажатии кнопки "Домой" возвращает пользователя к исходному приветственному сообщению,
-    которое содержит две кнопки и является главным меню (как в main.py).
-    """
-    query = update.callback_query
-    await query.answer()
-    # Отправляем главное меню. Здесь дублируется текст и клавиатура из функции start.
-    main_menu_text = (
-        "Привет! Я Академия ПК – ваш надёжный помощник в мире компьютерных технологий.\n\n"
-        "Я могу помочь вам пошагово собрать персональный компьютер, учитывая особенности ваших комплектующих. "
-        "Также я предлагаю два обучающих режима и интерактивное тестирование:\n\n"
-        "• Ассистент сборки ПК – подробная инструкция по сборке компьютера.\n"
-        "• Обучающий режим – выберите один из обучающих курсов (Базовый, Продвинутый, Профессиональный) "
-        "для получения полной обучающей информации и прохождения теста соответствующей сложности.\n"
-        "• Интерактивный режим – общий тест по знаниям о ПК.\n\n"
-        "Выберите режим работы:"
-    )
-    main_menu_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Ассистент сборки ПК", callback_data="assistant_pc"),
-         InlineKeyboardButton("Обучающий режим", callback_data="educational_mode")]
-    ])
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text=main_menu_text,
-        reply_markup=main_menu_keyboard,
-        parse_mode='HTML'
+async def send_stage_message(u, txt, header="", reply_markup=None):
+    await u.effective_message.reply_text(
+        (f"<b>{header}</b>\n" if header else "") + txt,
+        parse_mode="HTML",
+        reply_markup=reply_markup
     )
 
-# --------------------------------------------------
-# Обработка готовности к сборке
-# --------------------------------------------------
-async def handle_preparation_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    if query.data == "ready":
-        text = (
-            "Разложите комплектующие на ровной, просторной и непроводящей поверхности. "
-            "Убедитесь, что у вас достаточно места для работы.\n\n"
-            "Расположите их так, чтобы были легко доступны:\n"
-            "- Корпус\n"
-            "- Материнская плата\n"
-            "- Процессор, кулер и ОЗУ\n"
-            "- Видеокарта, SSD/HDD\n"
-            "- Блок питания"
-        )
-        await query.edit_message_text(text)
-        increment_progress(query.message.chat_id)
-        progress_text = current_progress_text(query.message.chat_id)
-        await send_stage_message(update, f"{progress_text}\n\nНажмите 'Дальше⏩', чтобы продолжить.",
-                                   header="🛠️ Этап подготовки",
-                                   reply_markup=InlineKeyboardMarkup([
-                                       [InlineKeyboardButton("Назад⏪", callback_data="back_to_start"),
-                                        InlineKeyboardButton("Дальше⏩", callback_data="next_step"),
-                                        InlineKeyboardButton("🏠", callback_data="go_home")]
-                                   ]))
-    else:
-        await query.edit_message_text("Пожалуйста, подготовьтесь и запустите сборку позже.")
-
-async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await assistant_pc(update, context)
-
-# --------------------------------------------------
-# Переход к выбору платформы (Процессора)
-# --------------------------------------------------
-async def process_next_step(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, "Выберите производителя процессора:",
-                               header="💻 Выбор платформы",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Intel", callback_data="Intel"),
-                                    InlineKeyboardButton("AMD", callback_data="AMD")],
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_preparation"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def back_to_preparation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_preparation_choice(update, context)
-
-# --------------------------------------------------
-# Обработка выбора платформы
-# --------------------------------------------------
-async def process_platform_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    platform = query.data
-    data = get_user_data(query.message.chat_id)
-    if "progress" not in data:
-        data["progress"] = 0
-    data["platform"] = platform
-    data["step_index"] = 0
-    set_user_data(query.message.chat_id, data)
-    await show_step(update, context)
-
-# --------------------------------------------------
-# Шаг установки процессора
-# --------------------------------------------------
-async def show_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_info = get_user_data(query.message.chat_id)
-    if user_info:
-        platform = user_info["platform"]
-        step_index = user_info["step_index"]
-        instructions_list = steps.get(platform, {}).get("instructions", [])
-        if step_index < len(instructions_list):
-            step_text = instructions_list[step_index]
-            await send_stage_message(update, step_text, header="⚙️ Установка процессора")
-            user_info["step_index"] += 1
-            update_user_step(query.message.chat_id, "step_index", user_info["step_index"])
-            increment_progress(query.message.chat_id)
-            progress_text = current_progress_text(query.message.chat_id)
-            await send_stage_message(update, f"{progress_text}\n\nНажмите 'Дальше⏩', чтобы перейти к выбору типа охлаждения.",
-                                       header="⚙️ Установка процессора",
-                                       reply_markup=InlineKeyboardMarkup([
-                                           [InlineKeyboardButton("Назад⏪", callback_data="back_to_platform"),
-                                            InlineKeyboardButton("Дальше⏩", callback_data="next_step_cooling"),
-                                            InlineKeyboardButton("🏠", callback_data="go_home")]
-                                       ]))
-
-async def back_to_platform(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await process_next_step(update, context)
-
-# --------------------------------------------------
-# Выбор типа охлаждения
-# --------------------------------------------------
-async def handle_cooling_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, "Установка охлаждения процессора:\nКакой тип охлаждения у вас?",
-                               header="❄️ Выбор системы охлаждения",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Воздушное", callback_data="air"),
-                                    InlineKeyboardButton("Водяное", callback_data="water")],
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_platform"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def handle_cooling_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    user_info = get_user_data(query.message.chat_id)
-    platform = user_info.get("platform", "Intel")
-    cooling_type = query.data
-    user_info["cooling"] = cooling_type
-    set_user_data(query.message.chat_id, user_info)
-    instructions = cooling_instructions.get(platform, {}).get(cooling_type, "Инструкция не найдена.")
-    await send_stage_message(update, instructions, header="❄️ Система охлаждения")
-    increment_progress(query.message.chat_id)
-    progress_text = current_progress_text(query.message.chat_id)
-    await send_stage_message(update, f"{progress_text}\n\nНажмите 'Дальше⏩', чтобы продолжить установку оперативной памяти.",
-                               header="❄️ Система охлаждения",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_cooling"),
-                                    InlineKeyboardButton("Дальше⏩", callback_data="next_step_ram"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def back_to_cooling(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_cooling_choice(update, context)
-
-# --------------------------------------------------
-# Выбор оперативной памяти
-# --------------------------------------------------
-async def handle_ram_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, "Установка оперативной памяти. Сколько планок ОЗУ у вас?",
-                               header="💾 Установка оперативной памяти",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("1 планка", callback_data="1"),
-                                    InlineKeyboardButton("2 планки", callback_data="2"),
-                                    InlineKeyboardButton("4 планки", callback_data="4")],
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_cooling"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def handle_ram_choice_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    ram_choice = query.data
-    instruction = ram_instructions.get(ram_choice, "Инструкция не найдена.")
-    await query.edit_message_text(instruction)
-    increment_progress(query.message.chat_id)
-    progress_text = current_progress_text(query.message.chat_id)
-    await send_stage_message(update, f"{progress_text}\n\nНажмите 'Дальше⏩', чтобы перейти к установке M.2 накопителя.",
-                               header="💾 Установка оперативной памяти",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_ram"),
-                                    InlineKeyboardButton("Дальше⏩", callback_data="next_step_m2"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def back_to_ram(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_ram_choice(update, context)
-
-# --------------------------------------------------
-# Установка M.2 накопителя
-# --------------------------------------------------
-async def handle_m2_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update,
-        "Установка M.2 накопителя:\n"
-        "1. Найдите слот M.2.\n"
-        "2. Аккуратно вставьте накопитель.\n"
-        "3. Зафиксируйте винтом.\n"
-        "[Видео](https://rutube.ru/video/fa86b5395ed102e415eb00d8a3b2f9fd/)",
-        header="🗜️ Установка M.2"
-    )
-    increment_progress(query.message.chat_id)
-    progress_text = current_progress_text(query.message.chat_id)
-    await send_stage_message(update, f"{progress_text}\n\nНажмите 'Дальше⏩', чтобы перейти к установке вентиляторов.",
-                               header="🗜️ Установка M.2",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_m2"),
-                                    InlineKeyboardButton("Дальше⏩", callback_data="next_step_fans"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def back_to_m2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_m2_choice(update, context)
-
-# --------------------------------------------------
-# Выбор типа установки вентиляторов
-# --------------------------------------------------
-async def handle_fan_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, "Установка вентиляторов в корпус. Выберите тип корпуса:",
-                               header="🌀 Установка вентиляторов",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Аквариумный тип", callback_data="aquarium"),
-                                    InlineKeyboardButton("Классический тип (нижнее расположение БП)", callback_data="classic_bottom")],
-                                   [InlineKeyboardButton("Классический тип (верхнее расположение БП)", callback_data="classic_top"),
-                                    InlineKeyboardButton("У меня уже установлены", callback_data="already_installed")],
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_m2"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def handle_fan_instructions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    instruction = fan_instructions.get(query.data, "Инструкция не найдена.")
-    await query.edit_message_text(instruction)
-    increment_progress(query.message.chat_id)
-    progress_text = current_progress_text(query.message.chat_id)
-    await send_stage_message(update, f"{progress_text}\n\nНажмите 'Дальше⏩', чтобы перейти к установке блока питания.",
-                               header="🌀 Установка вентиляторов",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_fans"),
-                                    InlineKeyboardButton("Дальше⏩", callback_data="next_step_power_supply"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def back_to_fans(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_fan_choice(update, context)
-
-# --------------------------------------------------
-# Установка блока питания
-# --------------------------------------------------
-async def handle_power_supply_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, power_supply_instructions,
-                               header="🔌 Установка блока питания")
-    increment_progress(query.message.chat_id)
-    progress_text = current_progress_text(query.message.chat_id)
-    await send_stage_message(update, f"{progress_text}\n\nНажмите 'Дальше⏩', чтобы продолжить.",
-                               header="🔌 Установка блока питания",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_fans"),
-                                    InlineKeyboardButton("Дальше⏩", callback_data="next_step_gpu_check"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def back_to_power(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_fan_instructions(update, context)
-
-# --------------------------------------------------
-# Проверка наличия видеокарты
-# --------------------------------------------------
-async def ask_gpu_presence(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, "Есть ли у вас дискретная видеокарта?",
-                               header="🎮 Подключение видеокарты",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Да", callback_data="gpu_yes"),
-                                    InlineKeyboardButton("Нет", callback_data="gpu_no")],
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_power"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def handle_gpu_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, gpu_instructions, header="🎮 Видеокарта")
-    increment_progress(query.message.chat_id)
-    progress_text = current_progress_text(query.message.chat_id)
-    await send_stage_message(update, f"{progress_text}\n\nНажмите 'Дальше⏩' для подключения проводов ПК.",
-                               header="🎮 Видеокарта",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_gpu"),
-                                    InlineKeyboardButton("Дальше⏩", callback_data="next_step_wires"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def handle_gpu_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    increment_progress(query.message.chat_id)
-    progress_text = current_progress_text(query.message.chat_id)
-    await send_stage_message(update, f"{progress_text}\n\nНажмите 'Дальше⏩' для подключения проводов ПК.",
-                               header="🎮 Видеокарта",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_gpu"),
-                                    InlineKeyboardButton("Дальше⏩", callback_data="next_step_wires"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def back_to_gpu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_power_supply_choice(update, context)
-
-# --------------------------------------------------
-# Подключение проводов ПК
-# --------------------------------------------------
-async def handle_wires_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, wires_instructions, header="🔗 Подключение проводов")
-    await send_stage_message(update, "Нужна ли вам помощь в установке ОС?",
-                               header="🔗 Подключение проводов",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Да", callback_data="os_yes"),
-                                    InlineKeyboardButton("Нет", callback_data="os_no")],
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_wires"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def back_to_wires(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_wires_instruction(update, context)
-
-# --------------------------------------------------
-# Выбор помощи в установке ОС
-# --------------------------------------------------
-async def handle_os_help_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, "Выберите операционную систему:",
-                               header="💿 Помощь в установке ОС",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Windows", callback_data="os_windows"),
-                                    InlineKeyboardButton("Linux", callback_data="os_linux"),
-                                    InlineKeyboardButton("Mac OS", callback_data="os_mac")],
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_wires"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def handle_os_help_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update, "Хорошо, переходим к завершению сборки.",
-                               header="💿 Помощь в установке ОС",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_wires"),
-                                    InlineKeyboardButton("Завершить сборку", callback_data="finish_assembly"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def back_to_os(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_os_help_yes(update, context)
-
-# --------------------------------------------------
-# Подробные инструкции по установке ОС
-# --------------------------------------------------
-async def handle_os_windows(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update,
-        "Подробная инструкция по установке **Windows**:\n\n"
-        "1. **Загрузка образа:** перейдите на официальный сайт Microsoft:\n"
-        "   https://www.microsoft.com/software-download/windows\n"
-        "   и скачайте ISO-образ.\n"
-        "2. **Создание загрузочной флешки:** используйте Rufus или Media Creation Tool.\n"
-        "3. **Настройка BIOS/UEFI:** при необходимости включите UEFI Boot.\n"
-        "4. **Запуск установки:** загрузитесь с флешки и следуйте инструкциям установщика.\n\n"
-        "Подробные рекомендации:\n"
-        "https://support.microsoft.com/en-us/windows",
-        header="🖥️ Установка Windows"
-    )
-    await send_stage_message(update, "Нажмите 'Завершить сборку', чтобы закончить процесс.",
-                               header="🖥️ Установка Windows",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_os"),
-                                    InlineKeyboardButton("Завершить сборку", callback_data="finish_assembly"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def handle_os_linux(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update,
-        "Подробная инструкция по установке **Linux**:\n\n"
-        "1. **Выбор дистрибутива:** например, Ubuntu, Fedora, Debian и т.д.\n"
-        "2. **Скачивание ISO:** с официальных сайтов (например, https://ubuntu.com/ для Ubuntu).\n"
-        "3. **Создание загрузочной флешки:** используйте balenaEtcher или Rufus.\n"
-        "4. **Настройка BIOS/UEFI:** включите UEFI или Legacy Boot (в зависимости от дистрибутива).\n"
-        "5. **Запуск установки:** загрузитесь с флешки и следуйте шагам установщика.\n\n"
-        "Подробнее:\n"
-        "• Ubuntu Docs: https://ubuntu.com/tutorials\n"
-        "• Fedora Docs: https://docs.fedoraproject.org/\n"
-        "• Debian Handbook: https://www.debian.org/doc/",
-        header="🐧 Установка Linux"
-    )
-    await send_stage_message(update, "Нажмите 'Завершить сборку', чтобы закончить процесс.",
-                               header="🐧 Установка Linux",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_os"),
-                                    InlineKeyboardButton("Завершить сборку", callback_data="finish_assembly"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-async def handle_os_mac(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update,
-        "Подробная инструкция по установке **Mac OS**:\n\n"
-        "1. **Проверьте совместимость:** убедитесь, что ваше устройство поддерживает нужную версию.\n"
-        "2. **Скачивание:** если это Mac, установщик можно загрузить из App Store. Для Hackintosh – используются специальные сборки.\n"
-        "3. **Создание загрузочной флешки (для Hackintosh):** используйте UniBeast или OpenCore.\n"
-        "4. **Настройка BIOS/UEFI:** отключите Secure Boot, включите AHCI и т.д.\n"
-        "5. **Установка:** загрузитесь с флешки и следуйте инструкциям установщика.\n\n"
-        "Подробнее:\n"
-        "• Apple Support: https://support.apple.com/boot-camp\n"
-        "• Hackintosh Guides: https://dortania.github.io/",
-        header="🍎 Установка Mac OS"
-    )
-    await send_stage_message(update, "Нажмите 'Завершить сборку', чтобы закончить процесс.",
-                               header="🍎 Установка Mac OS",
-                               reply_markup=InlineKeyboardMarkup([
-                                   [InlineKeyboardButton("Назад⏪", callback_data="back_to_os"),
-                                    InlineKeyboardButton("Завершить сборку", callback_data="finish_assembly"),
-                                    InlineKeyboardButton("🏠", callback_data="go_home")]
-                               ]))
-
-# --------------------------------------------------
-# Завершение сборки
-# --------------------------------------------------
-async def finish_assembly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await send_stage_message(update,
-        "Поздравляем! Сборка завершена. Приятного использования вашего нового ПК!",
-        header="🎉 Завершение сборки",
+# ─────────────────────────────────────────────────────────────
+# 3 ▸ Обработчики
+# ─────────────────────────────────────────────────────────────
+async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    cid = u.effective_chat.id
+    set_user_data(cid, {"progress": 0})
+    await send_stage_message(
+        u,
+        "🌟 <b>Ассистент сборки ПК</b>\n\nВыберите режим:",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Вернуться в главное меню 🏠", callback_data="go_home")]
+            [InlineKeyboardButton("Я готов", callback_data="ready")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")],
         ])
     )
 
-# --------------------------------------------------
-# Регистрация обработчиков для режима Ассистента сборки ПК
-# --------------------------------------------------
+async def assistant_pc(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    # вызывается из main.py
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "Проверьте наличие компонентов и инструментов:\n"
+        "- Материнская плата, процессор, охлаждение\n"
+        "- ОЗУ, SSD/M.2/HDD\n"
+        "- Блок питания, корпус, видеокарта\n"
+        "- Отвёртки, пинцет, стяжки, термопаста",
+        header="Режим ассистента сборки",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Я готов", callback_data="ready")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")],
+        ])
+    )
+
+async def handle_preparation_choice(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    if q.data == "ready":
+        await q.edit_message_text(PREPARATION_FULL, parse_mode="HTML")
+        increment_progress(q.message.chat_id)
+        await send_stage_message(
+            u,
+            f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше».",
+            header="🛠️ Подготовка завершена",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Назад⏪", callback_data="back_to_start"),
+                    InlineKeyboardButton("Дальше⏩", callback_data="next_step")
+                ],
+                [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+            ])
+        )
+    else:
+        await q.edit_message_text("Подготовьтесь и запустите сборку позже.")
+
+async def back_to_start(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await start(u, c)
+
+async def process_next_step(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "Выберите платформу процессора:",
+        header="💻 Выбор платформы",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Intel", callback_data="Intel"),
+                InlineKeyboardButton("AMD", callback_data="AMD")
+            ],
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_start"),
+                InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")
+            ]
+        ])
+    )
+
+async def back_to_preparation(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await assistant_pc(u, c)
+
+async def process_platform_choice(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    d = get_user_data(q.message.chat_id)
+    d.update(platform=q.data, step_index=0)
+    set_user_data(q.message.chat_id, d)
+    await show_step(u, c)
+
+async def show_step(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; d = get_user_data(q.message.chat_id)
+    lst = steps[d["platform"]]["instructions"]
+    idx = d["step_index"]
+    if idx < len(lst):
+        await send_stage_message(u, lst[idx], header="⚙️ Установка процессора")
+        d["step_index"] += 1; set_user_data(q.message.chat_id, d)
+        increment_progress(q.message.chat_id)
+        await send_stage_message(
+            u,
+            f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше».",
+            header="⚙️ Установка процессора",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Назад⏪", callback_data="back_to_platform"),
+                    InlineKeyboardButton("Дальше⏩", callback_data="next_step_cooling")
+                ],
+                [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+            ])
+        )
+
+async def back_to_platform(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await process_next_step(u, c)
+
+async def handle_cooling_choice(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "Тип охлаждения:",
+        header="❄️ Система охлаждения",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Воздушное", callback_data="air"),
+                InlineKeyboardButton("Жидкостное", callback_data="water")
+            ],
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_platform"),
+                InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")
+            ]
+        ])
+    )
+
+async def handle_cooling_selection(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    info = get_user_data(q.message.chat_id)
+    await send_stage_message(u, cooling_instructions[info["platform"]][q.data], header="❄️ Система охлаждения")
+    increment_progress(q.message.chat_id)
+    await send_stage_message(
+        u,
+        f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше».",
+        header="❄️ Система охлаждения",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_cooling"),
+                InlineKeyboardButton("Дальше⏩", callback_data="next_step_ram")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def back_to_cooling(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await handle_cooling_choice(u, c)
+
+async def handle_ram_choice(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "Сколько планок ОЗУ устанавливаете?",
+        header="💾 Установка ОЗУ",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("1", callback_data="1"),
+                InlineKeyboardButton("2", callback_data="2"),
+                InlineKeyboardButton("4", callback_data="4")
+            ],
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_cooling"),
+                InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")
+            ]
+        ])
+    )
+
+async def handle_ram_choice_selection(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await q.edit_message_text(ram_instructions[q.data], parse_mode="HTML")
+    increment_progress(q.message.chat_id)
+    await send_stage_message(
+        u,
+        f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше».",
+        header="💾 Установка ОЗУ",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_ram"),
+                InlineKeyboardButton("Дальше⏩", callback_data="next_step_m2")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def back_to_ram(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await handle_ram_choice(u, c)
+
+async def handle_m2_choice(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(u, M2_DETAILED, header="🗜️ M.2 SSD")
+    increment_progress(q.message.chat_id)
+    await send_stage_message(
+        u,
+        f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше».",
+        header="🗜️ M.2 SSD",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_ram"),
+                InlineKeyboardButton("Дальше⏩", callback_data="next_step_fans")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def back_to_m2(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await handle_m2_choice(u, c)
+
+async def handle_fan_choice(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "Тип корпуса:",
+        header="🌀 Установка вентиляторов",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Аквариумный", callback_data="aquarium")],
+            [InlineKeyboardButton("Классический (БП внизу)", callback_data="classic_bottom")],
+            [InlineKeyboardButton("Классический (БП сверху)", callback_data="classic_top")],
+            [InlineKeyboardButton("Уже установлены", callback_data="already_installed")],
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_m2"),
+                InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")
+            ]
+        ])
+    )
+
+async def handle_fan_instructions(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await q.edit_message_text(fan_instructions[q.data], parse_mode="HTML")
+    increment_progress(q.message.chat_id)
+    await send_stage_message(
+        u,
+        f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше».",
+        header="🌀 Установка вентиляторов",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_fans"),
+                InlineKeyboardButton("Дальше⏩", callback_data="next_step_power_supply")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def back_to_fans(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await handle_fan_choice(u, c)
+
+async def handle_power_supply_choice(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(u, power_supply_instructions, header="🔌 Блок питания")
+    increment_progress(q.message.chat_id)
+    await send_stage_message(
+        u,
+        f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше».",
+        header="🔌 Блок питания",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_fans"),
+                InlineKeyboardButton("Дальше⏩", callback_data="next_step_gpu_check")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def back_to_power(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await handle_power_supply_choice(u, c)
+
+async def ask_gpu_presence(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "Есть дискретная видеокарта?",
+        header="🎮 Видеокарта",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Да", callback_data="gpu_yes"),
+                InlineKeyboardButton("Нет", callback_data="gpu_no")
+            ],
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_power"),
+                InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")
+            ]
+        ])
+    )
+
+async def handle_gpu_yes(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(u, gpu_instructions, header="🎮 Установка видеокарты")
+    increment_progress(q.message.chat_id)
+    await send_stage_message(
+        u,
+        f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше».",
+        header="🎮 Установка видеокарты",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_gpu"),
+                InlineKeyboardButton("Дальше⏩", callback_data="next_step_wires")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def handle_gpu_no(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    increment_progress(q.message.chat_id)
+    await send_stage_message(
+        u,
+        f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше».",
+        header="🎮 Видеокарта",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_gpu"),
+                InlineKeyboardButton("Дальше⏩", callback_data="next_step_wires")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def back_to_gpu(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await ask_gpu_presence(u, c)
+
+async def handle_wires_instruction(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(u, wires_instructions, header="🔗 Подключение кабелей")
+    img = Path(__file__).with_name("IMG_5330.jpg")
+    if img.exists():
+        with open(img, "rb") as ph:
+            await c.bot.send_photo(q.message.chat_id, ph, caption="Схема PANEL1")
+    increment_progress(q.message.chat_id)
+    await send_stage_message(
+        u,
+        f"{current_progress_text(q.message.chat_id)}\n\nНажмите «Дальше» для установки ОС.",
+        header="🔗 Подключение кабелей",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_wires"),
+                InlineKeyboardButton("Дальше⏩", callback_data="next_step_os")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def back_to_wires(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    decrement_progress(u.effective_chat.id)
+    await handle_wires_instruction(u, c)
+
+async def ask_os_question(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "Нужна помощь с установкой ОС?",
+        header="💿 Установка ОС",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Да", callback_data="os_yes"),
+                InlineKeyboardButton("Нет", callback_data="os_no")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def handle_os_help_yes(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "Выберите ОС:",
+        header="💿 Установка ОС",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Windows", callback_data="os_windows"),
+                InlineKeyboardButton("Linux", callback_data="os_linux"),
+                InlineKeyboardButton("macOS", callback_data="os_mac")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def handle_os_help_no(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "Переходим к завершению сборки.",
+        header="💿 Установка ОС",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="back_to_wires"),
+                InlineKeyboardButton("Завершить", callback_data="finish_assembly")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def handle_os_windows(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(u, WIN_TEXT, header="🖥️ Установка Windows")
+    await send_stage_message(
+        u,
+        "Нажмите «Завершить», чтобы закончить.",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="os_yes"),
+                InlineKeyboardButton("Завершить", callback_data="finish_assembly")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def handle_os_linux(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(u, LINUX_TEXT, header="🐧 Установка Ubuntu")
+    await send_stage_message(
+        u,
+        "Нажмите «Завершить», чтобы закончить.",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="os_yes"),
+                InlineKeyboardButton("Завершить", callback_data="finish_assembly")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def handle_os_mac(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(u, MAC_TEXT, header="🍎 Установка macOS")
+    await send_stage_message(
+        u,
+        "Нажмите «Завершить», чтобы закончить.",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("Назад⏪", callback_data="os_yes"),
+                InlineKeyboardButton("Завершить", callback_data="finish_assembly")
+            ],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def finish_assembly(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    await send_stage_message(
+        u,
+        "🎉 <b>Сборка завершена!</b> Приятного пользования новым ПК!",
+        header="🎉 Готово",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="go_home")]
+        ])
+    )
+
+async def go_home(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query
+    if q:
+        await q.answer()
+    from main import start_main_menu
+    await start_main_menu(u, c)
+
+# ─────────────────────────────────────────────────────────────
+# 4 ▸ Регистрация обработчиков
+# ─────────────────────────────────────────────────────────────
 def setup_handlers(app):
-    app.add_handler(CallbackQueryHandler(assistant_pc, pattern="^assistant_pc$"))
-    app.add_handler(CallbackQueryHandler(go_home, pattern="^go_home$"))
+    # Обработчики навигации внутри ассистента
     app.add_handler(CallbackQueryHandler(handle_preparation_choice, pattern="^(ready|not_ready)$"))
-    app.add_handler(CallbackQueryHandler(back_to_start, pattern="^back_to_start$"))
-    app.add_handler(CallbackQueryHandler(process_next_step, pattern="^next_step$"))
-    app.add_handler(CallbackQueryHandler(back_to_preparation, pattern="^back_to_preparation$"))
-    app.add_handler(CallbackQueryHandler(process_platform_choice, pattern="^(Intel|AMD)$"))
-    app.add_handler(CallbackQueryHandler(back_to_platform, pattern="^back_to_platform$"))
-    # Переход к выбору типа охлаждения
-    app.add_handler(CallbackQueryHandler(handle_cooling_choice, pattern="^next_step_cooling$"))
-    app.add_handler(CallbackQueryHandler(back_to_cooling, pattern="^back_to_cooling$"))
-    app.add_handler(CallbackQueryHandler(handle_cooling_selection, pattern="^(air|water)$"))
-    # Выбор оперативной памяти
-    app.add_handler(CallbackQueryHandler(handle_ram_choice, pattern="^next_step_ram$"))
+    app.add_handler(CallbackQueryHandler(back_to_start,             pattern="^back_to_start$"))
+    app.add_handler(CallbackQueryHandler(process_next_step,         pattern="^next_step$"))
+    app.add_handler(CallbackQueryHandler(back_to_preparation,       pattern="^back_to_preparation$"))
+    app.add_handler(CallbackQueryHandler(process_platform_choice,   pattern="^(Intel|AMD)$"))
+    app.add_handler(CallbackQueryHandler(back_to_platform,          pattern="^back_to_platform$"))
+    app.add_handler(CallbackQueryHandler(handle_cooling_choice,     pattern="^next_step_cooling$"))
+    app.add_handler(CallbackQueryHandler(handle_cooling_selection,  pattern="^(air|water)$"))
+    app.add_handler(CallbackQueryHandler(back_to_cooling,           pattern="^back_to_cooling$"))
+    app.add_handler(CallbackQueryHandler(handle_ram_choice,         pattern="^next_step_ram$"))
     app.add_handler(CallbackQueryHandler(handle_ram_choice_selection, pattern="^(1|2|4)$"))
-    app.add_handler(CallbackQueryHandler(back_to_ram, pattern="^back_to_ram$"))
-    # Установка M.2 накопителя
-    app.add_handler(CallbackQueryHandler(handle_m2_choice, pattern="^next_step_m2$"))
-    app.add_handler(CallbackQueryHandler(back_to_m2, pattern="^back_to_m2$"))
-    # Выбор типа установки вентиляторов
-    app.add_handler(CallbackQueryHandler(handle_fan_choice, pattern="^next_step_fans$"))
-    app.add_handler(CallbackQueryHandler(back_to_fans, pattern="^back_to_fans$"))
-    app.add_handler(CallbackQueryHandler(handle_fan_instructions, pattern="^(aquarium|classic_bottom|classic_top|already_installed)$"))
-    # Установка блока питания
-    app.add_handler(CallbackQueryHandler(handle_power_supply_choice, pattern="^next_step_power_supply$"))
-    app.add_handler(CallbackQueryHandler(back_to_power, pattern="^back_to_power$"))
-    # Проверка наличия видеокарты
-    app.add_handler(CallbackQueryHandler(ask_gpu_presence, pattern="^next_step_gpu_check$"))
-    app.add_handler(CallbackQueryHandler(handle_gpu_yes, pattern="^gpu_yes$"))
-    app.add_handler(CallbackQueryHandler(handle_gpu_no, pattern="^gpu_no$"))
-    app.add_handler(CallbackQueryHandler(back_to_gpu, pattern="^back_to_gpu$"))
-    # Подключение проводов ПК
-    app.add_handler(CallbackQueryHandler(handle_wires_instruction, pattern="^next_step_wires$"))
-    app.add_handler(CallbackQueryHandler(back_to_wires, pattern="^back_to_wires$"))
-    # Помощь в установке ОС
-    app.add_handler(CallbackQueryHandler(handle_os_help_yes, pattern="^os_yes$"))
-    app.add_handler(CallbackQueryHandler(handle_os_help_no, pattern="^os_no$"))
-    app.add_handler(CallbackQueryHandler(back_to_os, pattern="^back_to_os$"))
-    # Подробные инструкции по установке ОС
-    app.add_handler(CallbackQueryHandler(handle_os_windows, pattern="^os_windows$"))
-    app.add_handler(CallbackQueryHandler(handle_os_linux, pattern="^os_linux$"))
-    app.add_handler(CallbackQueryHandler(handle_os_mac, pattern="^os_mac$"))
-    # Завершение сборки
-    app.add_handler(CallbackQueryHandler(finish_assembly, pattern="^finish_assembly$"))
+    app.add_handler(CallbackQueryHandler(back_to_ram,               pattern="^back_to_ram$"))
+    app.add_handler(CallbackQueryHandler(handle_m2_choice,          pattern="^next_step_m2$"))
+    app.add_handler(CallbackQueryHandler(back_to_m2,                pattern="^back_to_m2$"))
+    app.add_handler(CallbackQueryHandler(handle_fan_choice,         pattern="^next_step_fans$"))
+    app.add_handler(CallbackQueryHandler(handle_fan_instructions,   pattern="^(aquarium|classic_bottom|classic_top|already_installed)$"))
+    app.add_handler(CallbackQueryHandler(back_to_fans,              pattern="^back_to_fans$"))
+    app.add_handler(CallbackQueryHandler(handle_power_supply_choice,pattern="^next_step_power_supply$"))
+    app.add_handler(CallbackQueryHandler(back_to_power,             pattern="^back_to_power$"))
+    app.add_handler(CallbackQueryHandler(ask_gpu_presence,          pattern="^next_step_gpu_check$"))
+    app.add_handler(CallbackQueryHandler(handle_gpu_yes,            pattern="^gpu_yes$"))
+    app.add_handler(CallbackQueryHandler(handle_gpu_no,             pattern="^gpu_no$"))
+    app.add_handler(CallbackQueryHandler(back_to_gpu,               pattern="^back_to_gpu$"))
+    app.add_handler(CallbackQueryHandler(handle_wires_instruction,  pattern="^next_step_wires$"))
+    app.add_handler(CallbackQueryHandler(back_to_wires,             pattern="^back_to_wires$"))
+    app.add_handler(CallbackQueryHandler(ask_os_question,           pattern="^next_step_os$"))
+    app.add_handler(CallbackQueryHandler(handle_os_help_yes,        pattern="^os_yes$"))
+    app.add_handler(CallbackQueryHandler(handle_os_help_no,         pattern="^os_no$"))
+    app.add_handler(CallbackQueryHandler(handle_os_windows,         pattern="^os_windows$"))
+    app.add_handler(CallbackQueryHandler(handle_os_linux,           pattern="^os_linux$"))
+    app.add_handler(CallbackQueryHandler(handle_os_mac,             pattern="^os_mac$"))
+    app.add_handler(CallbackQueryHandler(finish_assembly,           pattern="^finish_assembly$"))
+    app.add_handler(CallbackQueryHandler(go_home,                   pattern="^go_home$"))
