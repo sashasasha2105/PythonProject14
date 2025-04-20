@@ -503,3 +503,4 @@ def setup_handlers(app):
     app.add_handler(CallbackQueryHandler(edu_go_home,                pattern="^edu_home$"))
     app.add_handler(CallbackQueryHandler(test_start,                 pattern="^test_start$"))
     app.add_handler(CallbackQueryHandler(test_answer,                pattern="^test_ans_"))
+    # ок
